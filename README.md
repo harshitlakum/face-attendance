@@ -196,5 +196,3 @@ curl -F "file=@Harsh3.JPG" "http://localhost:8000/identify?tau=0.6"
 ---
 
 
-git push
-```
