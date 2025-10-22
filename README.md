@@ -1,149 +1,188 @@
+
 # Face Attendance API (FastAPI + `face_recognition`) — with Basic Anti-Spoofing
 
-[![CI](https://github.com/harshitlakum/face-attendance/actions/workflows/ci.yml/badge.svg)](https://github.com/harshitlakum/face-attendance/actions/workflows/ci.yml)
 
-> Minimal, production-shaped microservice that **enrolls** faces and **identifies** people from images using 128-D embeddings. Open-set verification via distance threshold **τ** (returns `unknown` when > τ) plus **basic anti-spoofing** to reject obvious screen/print attacks. Demo-ready, Dockerized, and tested.  
-> **Disclaimer:** Not for security-critical use.
 
-**Demo video (90s):** _add Loom link here_
+> A small, production-shaped microservice that **enrolls** faces and **identifies** people from images using 128-D embeddings. It does **open-set** verification with a distance threshold **τ** (returns `unknown` if above τ) and **basic anti-spoofing** to block obvious screen/print attacks.
+> **Disclaimer:** Demo project — not for security-critical use.
 
 ---
 
-## Features
-- **Endpoints:** `/enroll` (store embeddings per label), `/identify` (label or `unknown` with distance), `/health`
-- **Anti-spoofing:** glare + low-texture heuristics (Laplacian variance & saturation)
-- **Storage:** SQLite embeddings (no raw images) — easy deletion per user
-- **Ops:** pytest health test, Dockerfile, GitHub Actions CI
+## What this does
+
+* **`/enroll`** — extract face embeddings and store them in SQLite under a label (e.g., `Harsh`).
+* **`/identify`** — compare a new image to the DB and return `{ label | "unknown", distance }` using threshold **τ**.
+* **Anti-spoofing** — rejects images that look like screens/prints via glare saturation + Laplacian variance heuristics.
+* **Ops shape** — FastAPI app, pinned deps, a health test (`pytest`), and CI.
 
 ---
 
-## Quickstart
+## Repo layout 
 
+```
+app/                 # FastAPI service code
+  __init__.py
+  main.py            # routes: /health, /enroll, /identify
+  recog.py           # embeddings + nearest-match
+  store.py           # SQLite persistence (embeddings only)
+  liveness.py        # simple anti-spoofing heuristics
+  schemas.py         # response models
+tests/
+  test_health.py     # basic health test
+data/
+  embeddings.sqlite  # created at runtime
+Dockerfile
+Makefile
+requirements.txt
+# Example images + screenshots (in repo root)
+Harsh.JPG Harsh2.JPG Harsh3.JPG Pra.JPG Pra2.JPG Pra3.JPG
+ss-01-health.png ss-02-enroll.png ss-03-identify-harsh.png
+ss-04-identify-pra.png ss-05-liveness-400.png ss-06-db.png
+ss-07-openapi.png ss-08-docker.png
+```
 
-### Local
+---
+
+## Quickstart (local)
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-export PYTHONPATH="$(pwd)"   # macOS/tests convenience
+
+# (macOS convenience for tests/imports)
+export PYTHONPATH="$(pwd)"
+
+# run API
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-````
-
-### Docker
-
-```bash
-docker build -t face-attendance .
-docker run -p 8000:8000 -v "$(pwd)"/data:/app/data face-attendance
 ```
 
-### Health
+Health check:
 
 ```bash
 curl -s http://localhost:8000/health
 # {"status":"ok"}
 ```
 
+Run tests:
+
+```bash
+pytest -q
+```
+
+Swagger / OpenAPI:
+
+* Docs UI: [http://localhost:8000/docs](http://localhost:8000/docs)
+* OpenAPI JSON: [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)
+
 ---
 
 ## API
 
-### `POST /enroll?label=<name>`
+### POST `/enroll?label=<name>`
 
-* **Body:** multipart `file=@image.jpg|png`
-* **Response:** `{ "enrolled": N }`
+* **Body:** multipart form with `file=@image.jpg|png`
+* **Response:** `{ "enrolled": N }` (faces found)
 * **Errors:** `400 "failed liveness checks"` · `400 "no face detected"`
 
-### `POST /identify?tau=0.6`
+### POST `/identify?tau=0.6`
 
-* **Body:** multipart `file=@image.jpg|png`
+* **Body:** multipart form with `file=@image.jpg|png`
 * **Response:** `{ "label": "<name|unknown>", "distance": <float> }`
 * **Note:** tune **τ** for your gallery (typical 0.50–0.65)
 
 **Examples**
 
 ```bash
+# enroll Harsh
 curl -F "file=@Harsh.JPG"  "http://localhost:8000/enroll?label=Harsh"
+
+# identify Harsh
 curl -F "file=@Harsh3.JPG" "http://localhost:8000/identify?tau=0.6"
 ```
 
 ---
 
-## Demo (screens)
+## Demo 
 
 <p align="center">
-  <img src="docs/ss-01-health.png" width="520" alt="Health OK">
+  <img src="ss-01-health.png" width="520" alt="Health OK">
 </p>
 
 **Enroll & Identify**
 
 <p align="center">
-  <img src="docs/ss-02-enroll.png" width="520" alt="Enroll">
+  <img src="ss-02-enroll.png" width="520" alt="Enroll">
   <br/>
-  <img src="docs/ss-03-identify-harsh.png" width="520" alt="Identify Harsh">
+  <img src="ss-03-identify-harsh.png" width="520" alt="Identify Harsh">
   <br/>
-  <img src="docs/ss-04-identify-pra.png" width="520" alt="Identify Pra">
+  <img src="ss-04-identify-pra.png" width="520" alt="Identify Pra">
 </p>
 
 **Anti-spoof (basic liveness)**
 
 <p align="center">
-  <img src="docs/ss-05-liveness-400.png" width="680" alt="Rejected spoof (HTTP 400)">
+  <img src="ss-05-liveness-400.png" width="680" alt="Rejected spoof (HTTP 400)">
 </p>
 
-**State & Ops**
+**State & API schema**
 
 <p align="center">
-  <img src="docs/ss-06-db.png" width="520" alt="SQLite rows & labels">
+  <img src="ss-06-db.png" width="520" alt="SQLite rows & labels">
   <br/>
-  <img src="docs/ss-07-openapi.png" width="680" alt="OpenAPI schema (excerpt)">
-  <br/>
-  <img src="docs/ss-08-docker.png" width="680" alt="Docker container running">
+  <img src="ss-07-openapi.png" width="680" alt="OpenAPI schema (excerpt)">
+</p>
+
+*(If you use Docker, keep `ss-08-docker.png` here as well.)*
+
+<p align="center">
+  <img src="ss-08-docker.png" width="680" alt="Docker container running">
 </p>
 
 ---
 
-## Architecture (at a glance)
+## How it works (at a glance)
 
 ```
 [Client] --multipart--> [FastAPI]
-   └─ basic_antispoof()  → reject obvious spoofs
-      face_recognition   → 128D embedding
-      SQLite store       → embeddings only (no images)
-      open-set match τ   → return label or 'unknown'
+   └─ basic_antispoof()   → reject obvious spoofs (glare / low texture)
+      face_recognition    → 128D face embedding
+      SQLite store        → embeddings only (no raw images)
+      open-set match (τ)  → nearest label if distance ≤ τ, else 'unknown'
 ```
 
 ---
 
 ## Evaluation (minimal)
 
-1. Small gallery (2–5 people, 2–3 images/person).
-2. Sweep τ to balance TPR/FAR; report **TPR@FAR≈0.1%**.
-3. Note p95 latency & liveness rejection rate on screen/print images.
+1. Build a tiny gallery (2–5 people, 2–3 images/person).
+2. Sweep **τ** to trade off **TPR vs FAR**; target **TPR@FAR≈0.1%** for the demo set.
+3. Note p95 latency and liveness rejection on screen/print photos.
 
 ---
 
 ## Privacy & Limits
 
-* Stores **embeddings only**; delete per label to remove a user.
-* Heuristic liveness (not production-grade).
-* HOG detector weaker in low light/pose; use `"cnn"` if CUDA dlib available.
+* Stores **embeddings only** (delete a label’s rows to remove a user).
+* Heuristic liveness only (not production-grade).
+* HOG detector struggles in low light/pose; switch to `"cnn"` if you have a CUDA dlib build.
 
 ---
 
 ## Troubleshooting
 
-* **`failed liveness checks`** → avoid screen photos; use real camera images, normal lighting.
+* **`failed liveness checks`** → avoid screen photos; use real camera images in normal lighting.
 * **`no face detected`** → face too small/profile/occluded; try a clearer frontal image.
 * macOS HEIC → convert: `sips -s format jpeg input.HEIC --out fixed.jpg`
-* Tests: `export PYTHONPATH="$(pwd)"; pytest -q`
+* Import path on macOS: `export PYTHONPATH="$(pwd)"` (run from repo root).
 
 ---
 
 ## Roadmap
 
 * `/list` & `/delete?label=` endpoints
-* `/metrics` (uptime, counts, latency)
-* Minimal HTML upload page under `/`
-* Swap SQLite → **FAISS** for >10k embeddings
+* `/metrics` (uptime, request counts, avg latency)
+* Minimal upload page at `/` (for non-CLI demo)
+* Swap SQLite → **FAISS** for large galleries (>10k embeddings)
 
 ---
 
@@ -151,7 +190,11 @@ curl -F "file=@Harsh3.JPG" "http://localhost:8000/identify?tau=0.6"
 
 * Designed **open-set** API (`/enroll`, `/identify`) with clean error handling
 * Implemented **basic anti-spoofing** heuristics
-* Built **SQLite** embedding store, **pytest** test, **Docker** packaging, **CI**
+* Built **SQLite** embedding store, **pytest** test, and **CI**
 * Documented privacy, limits, and threshold tuning
 
+---
 
+
+git push
+```
